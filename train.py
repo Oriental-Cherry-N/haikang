@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-自定义数据集完整训练脚本
+自定义数据集完整训练脚本 (适用于 anomalib 0.7.x)
 适用于包含正常数据、异常数据和异常掩码的工业缺陷检测任务
 
 Folder 数据模块期望的目录结构：
-./datasets/my_dataset/
+./datasets/task_1/
     ├── good/               # 正常图像（用于训练和测试）
     │   ├── 000.png
     │   └── ...
@@ -20,52 +20,49 @@ Folder 数据模块期望的目录结构：
 """
 
 from pathlib import Path
-from anomalib.data import Folder  # 用于自定义数据集的数据模块[6]
-from anomalib.models import Patchcore  # 选择Patchcore模型，也支持EfficientAd等[7]
-from anomalib.engine import Engine  # 训练引擎[7]
-from anomalib.deploy import ExportType  # 模型导出类型[13]
+from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
+
+from anomalib.data.folder import Folder
+from anomalib.data.task_type import TaskType
+from anomalib.models.patchcore import Patchcore  # 直接导入模型类
+from anomalib.post_processing import NormalizationMethod, ThresholdMethod
+from anomalib.utils.callbacks import (
+    MetricsConfigurationCallback,
+    PostProcessingConfigurationCallback,
+)
 
 def main():
     # ==================== 1. 配置参数 ====================
     # 数据集路径配置
-    dataset_root = Path("./datasets/my_dataset")  # 数据集根目录
-    dataset_name = "my_dataset"  # 数据集名称
-    normal_dir = "good"  # 正常样本目录名称（相对于root）
-    abnormal_dir = "defect"  # 异常样本目录名称（相对于root）
+    dataset_root = Path("./datasets/task_1")  # 任务1数据集
+    normal_dir = dataset_root / "good"  # 正常样本目录（绝对路径）
+    abnormal_dir = dataset_root / "defect"  # 异常样本目录（绝对路径）
     mask_dir = dataset_root / "mask" / "defect"  # 异常掩码目录（分割任务必需）
     
     # 训练参数配置
-    batch_size = 32  # 批次大小
+    batch_size = 8  # 批次大小
     num_workers = 8  # 数据加载工作线程数
-    image_size = (256, 256)  # 输入图像尺寸
+    image_size = (512, 512)  # 输入图像尺寸
     
     # 模型保存路径
-    output_dir = Path("results/my_dataset_training")  # 结果保存目录
+    output_dir = Path("results/task_1")  # 结果保存目录
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # ==================== 2. 初始化数据模块 ====================
     print("初始化数据模块...")
     
-    # 使用Folder数据模块加载自定义数据集
-    # Folder模块期望的目录结构：
-    #   dataset_root/
-    #   ├── good/          # normal_dir - 正常图像
-    #   ├── defect/        # abnormal_dir - 异常图像  
-    #   └── mask/defect/   # mask_dir - 异常掩码（与abnormal_dir中图像一一对应）
     datamodule = Folder(
-        name=dataset_name,  # 数据集名称
-        root=dataset_root,  # 数据集根路径
-        normal_dir=normal_dir,  # 正常样本目录（相对路径）
-        abnormal_dir=abnormal_dir,  # 异常样本目录（相对路径）
-        mask_dir=mask_dir,  # 掩码目录（分割任务必需，绝对路径）
-        image_size=image_size,  # 调整图像尺寸
-        train_batch_size=batch_size,  # 训练批次大小
-        eval_batch_size=batch_size,  # 评估批次大小
-        num_workers=num_workers,  # 数据加载线程数
-        task="segmentation",  # 分割任务（需要mask_dir）
+        normal_dir=normal_dir,
+        abnormal_dir=abnormal_dir,
+        mask_dir=mask_dir,
+        image_size=image_size,
+        train_batch_size=batch_size,
+        eval_batch_size=batch_size,
+        num_workers=num_workers,
+        task=TaskType.SEGMENTATION,
     )
-    
-    # 设置数据划分（自动识别训练集、测试集）
     datamodule.setup()
     
     print(f"数据集信息：")
@@ -75,54 +72,64 @@ def main():
     # ==================== 3. 初始化模型 ====================
     print("初始化模型...")
     
-    # 使用Patchcore模型，这是一种无监督异常检测模型，适合工业缺陷检测
-    # 也可以替换为EfficientAd：model = EfficientAd(teacher_out_channels=384)
+    # anomalib 0.7.x: 直接实例化 Patchcore，所有参数必须显式指定
     model = Patchcore(
-        # 可自定义模型参数，例如：
-        # backbone="wide_resnet50_2",  # 骨干网络
-        # num_neighbors=9,  # 最近邻数量
+        input_size=image_size,
+        backbone="resnet18",
+        layers=["layer2", "layer3"],
+        pre_trained=True,
+        coreset_sampling_ratio=0.01,
+        num_neighbors=9,
     )
     
-    # ==================== 4. 初始化训练引擎 ====================
-    print("初始化训练引擎...")
+    # ==================== 4. 配置回调函数 ====================
+    callbacks = [
+        MetricsConfigurationCallback(
+            task=TaskType.SEGMENTATION,
+            image_metrics=["AUROC", "F1Score"],
+            pixel_metrics=["AUROC", "F1Score"],
+        ),
+        PostProcessingConfigurationCallback(
+            normalization_method=NormalizationMethod.MIN_MAX,
+            threshold_method=ThresholdMethod.ADAPTIVE,
+        ),
+        ModelCheckpoint(
+            dirpath=output_dir / "weights",
+            filename="model",
+            monitor="pixel_AUROC",
+            mode="max",
+            save_last=True,
+        ),
+    ]
     
-    engine = Engine(
-        max_epochs=1,  # Patchcore通常只需1个epoch
-        # 对于EfficientAd等模型可能需要更多epochs，如max_epochs=200
-        accelerator="auto",  # 自动检测GPU/CPU
-        devices=1,  # 使用设备数量
-        default_root_dir=output_dir,  # 结果保存目录
-        # 可添加日志记录器，如：
-        # logger=TensorBoardLogger(save_dir="logs/"),
+    # ==================== 5. 初始化训练器 ====================
+    print("初始化训练器...")
+    
+    trainer = Trainer(
+        max_epochs=1,  # Patchcore 通常只需1个epoch
+        accelerator="gpu",
+        devices=1,
+        default_root_dir=output_dir,
+        logger=TensorBoardLogger(save_dir="logs/", name="task_1_log_test"),
+        callbacks=callbacks,
+        num_sanity_val_steps=0,  # 禁用 sanity check，Patchcore 需要先完成训练才能验证
     )
     
-    # ==================== 5. 执行训练 ====================
+    # ==================== 6. 执行训练 ====================
     print("开始训练...")
-    engine.fit(model=model, datamodule=datamodule)
+    trainer.fit(model=model, datamodule=datamodule)
     
-    # ==================== 6. 测试评估 ====================
+    # ==================== 7. 测试评估 ====================
     print("在测试集上评估模型性能...")
-    test_results = engine.test(model=model, datamodule=datamodule)
+    test_results = trainer.test(model=model, datamodule=datamodule)
     
     # 打印评估指标
     print("测试结果：")
     for key, value in test_results[0].items():
-        if "image" in key or "pixel" in key or "AUROC" in key:
+        if isinstance(value, float):
             print(f"  {key}: {value:.4f}")
     
-    # ==================== 7. 导出模型（可选） ====================
-    print("导出模型为优化格式...")
-    
-    # 导出为OpenVINO格式以加速推理
-    engine.export(
-        model=model,
-        export_root=output_dir / "exported_model",
-        input_size=image_size,
-        export_type=ExportType.OPENVINO,  # 导出为OpenVINO格式
-    )
-    
-    print(f"训练完成！结果保存在：{output_dir}")
-    print(f"优化模型保存在：{output_dir / 'exported_model'}")
+    print(f"\n训练完成！结果保存在：{output_dir}")
 
 if __name__ == "__main__":
     main()

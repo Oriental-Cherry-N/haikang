@@ -1,0 +1,19 @@
+{
+    // 1. 确保默认终端是 PowerShell
+    "terminal.integrated.defaultProfile.windows": "MyCondaTerminal",
+
+    // 2. 定义一个专用的终端配置
+    "terminal.integrated.profiles.windows": {
+        "MyCondaTerminal": {
+            "path": "powershell.exe",
+            "args": [
+                "-ExecutionPolicy", "ByPass",
+                "-NoExit",
+                "-Command",
+                // ↓↓↓ 下面这行是关键，把 '你的环境名' 换成真实名字 ↓↓↓
+                "conda activate haikang" 
+            ],
+            "icon": "terminal-powershell"
+        }
+    }
+}

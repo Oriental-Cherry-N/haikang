@@ -42,9 +42,9 @@ def main():
     mask_dir = dataset_root / "mask" / "defect"  # 异常掩码目录（分割任务必需）
     
     # 训练参数配置
-    batch_size = 8  # 批次大小
+    batch_size = 1  # 批次大小
     num_workers = 8  # 数据加载工作线程数
-    image_size = (512, 512)  # 输入图像尺寸
+    image_size = (1024, 1024)  # 输入图像尺寸
     
     # 模型保存路径
     output_dir = Path("results/task_1")  # 结果保存目录

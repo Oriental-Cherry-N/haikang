@@ -1,0 +1,201 @@
+# 小样本缺陷检测默认配置文件
+# 适用于 anomalib 0.7.x
+
+# ==================== 模型配置 ====================
+model:
+  # 模型类型: patchcore, padim
+  name: patchcore
+  
+  # 骨干网络: resnet18, resnet50, wide_resnet50_2
+  # 小样本场景推荐使用 resnet18（轻量级，减少过拟合风险）
+  backbone: resnet18
+  
+  # 特征提取层
+  # 多层特征融合可提高检测精度
+  layers:
+    - layer2
+    - layer3
+  
+  # 是否使用 ImageNet 预训练权重
+  # 强烈建议开启，利用迁移学习
+  pre_trained: true
+  
+  # 核心集采样比例 (仅 PatchCore)
+  # 小样本场景可适当增大（0.05-0.2）
+  # 样本多时可减小以节省内存（0.01-0.05）
+  coreset_sampling_ratio: 0.1
+  
+  # K近邻数量 (仅 PatchCore)
+  num_neighbors: 9
+  
+  # PaDiM 特征数量
+  n_features: 100
+
+# ==================== 数据配置 ====================
+data:
+  # 输入图像尺寸
+  # 根据缺陷大小和计算资源调整
+  # 推荐: 256x256（快速）, 512x512（平衡）, 1024x1024（高精度）
+  image_size:
+    - 512
+    - 512
+  
+  # 训练批次大小
+  # 小样本场景推荐小批次
+  train_batch_size: 1
+  
+  # 评估批次大小
+  eval_batch_size: 1
+  
+  # 数据加载线程数
+  num_workers: 8
+  
+  # 图像归一化方式: imagenet, none
+  normalization: imagenet
+
+# ==================== 训练器配置 ====================
+trainer:
+  # 最大训练轮数
+  # PatchCore 只需 1 轮
+  # 其他模型根据情况设置
+  max_epochs: 1
+  
+  # 加速器: gpu, cpu, auto
+  accelerator: gpu
+  
+  # GPU 数量
+  devices: 1
+  
+  # 训练精度: 32, 16 (混合精度)
+  # 16 可节省显存但可能影响精度
+  precision: 32
+
+# ==================== 数据增强配置 ====================
+augmentation:
+  # 几何变换
+  geometric:
+    enabled: true
+    horizontal_flip_p: 0.5
+    vertical_flip_p: 0.5
+    rotate90_p: 0.5
+    shift_limit: 0.0625
+    scale_limit: 0.1
+    rotate_limit: 15
+    shift_scale_rotate_p: 0.5
+  
+  # 颜色/光照变换
+  color:
+    enabled: true
+    brightness: 0.2
+    contrast: 0.2
+    saturation: 0.2
+    hue: 0.1
+    color_jitter_p: 0.5
+    brightness_limit: 0.2
+    contrast_limit: 0.2
+    brightness_contrast_p: 0.5
+  
+  # 噪声与模糊
+  noise:
+    enabled: true
+    var_limit:
+      - 10.0
+      - 50.0
+    gauss_noise_p: 0.3
+    blur_limit:
+      - 3
+      - 7
+    blur_p: 0.3
+  
+  # 弹性变换（模拟形变）
+  # 对于刚性物体可禁用
+  elastic:
+    enabled: false
+    alpha: 120
+    sigma: 6
+    alpha_affine: 3.6
+    p: 0.3
+
+# ==================== 域自适应配置 ====================
+domain_adaptation:
+  # 是否启用域自适应
+  enabled: true
+  
+  # 特征归一化方法: instance, layer, batch, none
+  # instance 对产品变型最鲁棒
+  normalization: instance
+
+# ==================== 增量学习配置 ====================
+incremental_learning:
+  # 是否启用增量学习
+  # 适用于部署后的在线更新
+  enabled: false
+  
+  # 在线记忆库最大容量
+  max_memory_size: 10000
+  
+  # 更新比例
+  update_ratio: 0.1
+
+# ==================== 后处理配置 ====================
+post_processing:
+  # 异常分数归一化方法: min_max, cdf, none
+  normalization: min_max
+  
+  # 阈值方法: adaptive, manual
+  threshold: adaptive
+  
+  # 手动阈值（仅当 threshold=manual 时生效）
+  manual_image_threshold: 0.5
+  manual_pixel_threshold: 0.5
+
+# ==================== 评估指标配置 ====================
+metrics:
+  # 图像级别指标
+  image_metrics:
+    - AUROC
+    - F1Score
+  
+  # 像素级别指标（分割任务）
+  pixel_metrics:
+    - AUROC
+    - F1Score
+
+# ==================== 可视化配置 ====================
+visualization:
+  # 可视化模式: full, simple
+  mode: full
+  
+  # 是否保存图像
+  save_images: true
+  
+  # 是否显示图像
+  show_images: false
+  
+  # 颜色映射
+  colormap: jet
+  
+  # 叠加透明度
+  alpha: 0.5
+
+# ==================== 推理配置 ====================
+inference:
+  # 推理设备: auto, cpu, cuda
+  device: auto
+  
+  # 是否启用自适应阈值
+  adaptive_threshold: true
+  
+  # 是否启用在线学习
+  online_learning: false
+  
+  # 置信度校准温度
+  confidence_temperature: 1.0
+
+# ==================== 其他配置 ====================
+misc:
+  # 随机种子（确保可重复性）
+  seed: 42
+  
+  # 日志级别: debug, info, warning, error
+  log_level: info
